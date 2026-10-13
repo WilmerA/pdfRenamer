@@ -1,7 +1,7 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
-import { startFolder } from "./watcher/folder-processor";
+import { startFolder } from "./processor/folder-processor";
 
 const FOLDERS = {
   input: path.resolve("folders/input"),
