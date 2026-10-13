@@ -14,5 +14,8 @@ await mkdir(FOLDERS.processed, { recursive: true });
 await mkdir(FOLDERS.review, { recursive: true });
 
 console.log("🚀 PDF Renamer iniciado (modo batch)");
+console.log(`📂 Carpeta de entrada: ${FOLDERS.input}`);
+console.log(`📂 Carpeta procesados: ${FOLDERS.processed}`);
+console.log(`📂 Carpeta revisión:   ${FOLDERS.review}\n`);
 
-await startFolder(FOLDERS.input);
+await startFolder(FOLDERS);
