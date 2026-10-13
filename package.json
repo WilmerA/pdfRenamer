@@ -1,0 +1,16 @@
+{
+  "name": "pdf-renamer",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^26.6.3",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@types/pdf-parse": "^1.1.5",
+    "pdf-parse": "^2.4.5"
+  }
+}
