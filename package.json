@@ -12,6 +12,6 @@
   "dependencies": {
     "@openrouter/sdk": "^1.4.25",
     "@types/pdf-parse": "^1.1.5",
-    "pdf-parse": "^2.4.5"
+    "pdfreader": "^3.0.8"
   }
 }

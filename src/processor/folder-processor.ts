@@ -78,9 +78,8 @@ export async function startFolder(folders: FolderPaths) {
         moveToReview = true;
         reviewReason = "PDF sin texto extraíble";
       } else {
-        // Limitar texto para no exceder límites de la API
-        const limitedText = text.slice(0, 15000);
-        analysis = await getInfo(limitedText);
+        
+        analysis = await getInfo(text);
 
         if (analysis.status !== "PROCESADO") {
           moveToReview = true;
