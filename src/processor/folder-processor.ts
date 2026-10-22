@@ -1,7 +1,7 @@
-import { readdir, mkdir, rename } from "node:fs/promises";
+import { access, mkdir, readdir, rename } from "node:fs/promises";
 import path from "node:path";
 import { readPdf } from "../pdf/pdf-reader";
-import { getInfo, AnalysisResult } from "../process-ia/extract-info";
+import { getInfo, type AnalysisResult } from "../process-ia/extract-info";
 
 interface FolderPaths {
   input: string;
@@ -9,35 +9,64 @@ interface FolderPaths {
   review: string;
 }
 
-function getSafeDestination(destDir: string, fileName: string): string {
-  let destPath = path.join(destDir, fileName);
-  let counter = 1;
+const VALID_TYPES = new Set(["1.0", "1.2", "1.3", "1.4"]);
+const CONTRACT_PATTERN = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/i;
 
-  while (true) {
+function isValidContract(contract: unknown): contract is string {
+  return (
+    typeof contract === "string" &&
+    contract !== "DESCONOCIDO" &&
+    CONTRACT_PATTERN.test(contract)
+  );
+}
+
+function isValidDate(date: unknown): date is string {
+  if (typeof date !== "string" || !/^\d{8}$/.test(date)) return false;
+
+  const day = Number(date.slice(0, 2));
+  const month = Number(date.slice(2, 4));
+  const year = Number(date.slice(4, 8));
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function isCompleteAnalysis(value: AnalysisResult): boolean {
+  return (
+    value.status === "PROCESADO" &&
+    typeof value.type === "string" &&
+    VALID_TYPES.has(value.type) &&
+    isValidContract(value.contract) &&
+    isValidDate(value.fecha)
+  );
+}
+
+async function getSafeDestination(destDir: string, fileName: string): Promise<string> {
+  const extension = path.extname(fileName);
+  const baseName = path.basename(fileName, extension);
+
+  for (let counter = 0; ; counter++) {
+    const candidateName = counter === 0
+      ? fileName
+      : `${baseName} (${counter})${extension}`;
+    const candidatePath = path.join(destDir, candidateName);
+
     try {
-      // Verificar si existe
-      require("node:fs").accessSync(destPath);
-      // Si existe, generar nuevo nombre con sufijo
-      const ext = path.extname(fileName);
-      const base = path.basename(fileName, ext);
-      destPath = path.join(destDir, `${base} (${counter})${ext}`);
-      counter++;
-    } catch {
-      // No existe, podemos usar este nombre
-      break;
+      await access(candidatePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return candidatePath;
+      }
+      throw error;
     }
   }
-  return destPath;
 }
 
-function getContractFolderName(analysis: AnalysisResult): string {
-  if (analysis.contract && analysis.contract !== "DESCONOCIDO") {
-    return analysis.contract;
-  }
-  return "SIN_CONTRATO";
-}
-
-export async function startFolder(folders: FolderPaths) {
+export async function startFolder(folders: FolderPaths): Promise<void> {
   console.log(`📂 Escaneando carpeta de entrada: ${folders.input}\n`);
 
   let entries;
@@ -68,72 +97,55 @@ export async function startFolder(folders: FolderPaths) {
     console.log(`--- Procesando: ${fileName} ---`);
 
     let analysis: AnalysisResult | null = null;
-    let moveToReview = false;
     let reviewReason = "";
 
     try {
       const text = await readPdf(filePath);
 
-      if (!text || text.trim().length === 0) {
-        moveToReview = true;
+      if (!text.trim()) {
         reviewReason = "PDF sin texto extraíble";
       } else {
-        
         analysis = await getInfo(text);
-
-        if (analysis.status !== "PROCESADO") {
-          moveToReview = true;
-          reviewReason = `Status: ${analysis.status}`;
-        } else if (
-          analysis.type === "DESCONOCIDO" ||
-          analysis.contract === "DESCONOCIDO" ||
-          analysis.fecha === "DESCONOCIDO"
-        ) {
-          moveToReview = true;
-          reviewReason = "Datos incompletos (DESCONOCIDO)";
+        if (!isCompleteAnalysis(analysis)) {
+          reviewReason = analysis.status === "PENDIENTE"
+            ? "La IA indicó que la información está pendiente o incompleta"
+            : "La respuesta de la IA contiene datos inválidos o incompletos";
         }
       }
     } catch (error) {
-      moveToReview = true;
-      reviewReason = `Error: ${error instanceof Error ? error.message : String(error)}`;
+      reviewReason = `Error de lectura o análisis: ${error instanceof Error ? error.message : String(error)}`;
     }
 
-    if (moveToReview) {
-      // Determinar carpeta de contrato para review
-      const contractFolder = analysis?.contract && analysis.contract !== "DESCONOCIDO"
-        ? analysis.contract
-        : "SIN_CONTRATO";
+    const isProcessed = analysis !== null && isCompleteAnalysis(analysis);
+    const contractFolder = analysis && isValidContract(analysis.contract)
+      ? analysis.contract
+      : "SIN_CONTRATO";
+    const destinationDirectory = isProcessed
+      ? path.join(folders.processed, contractFolder)
+      : path.join(folders.review, contractFolder);
+    const destinationFileName = isProcessed && analysis
+      ? `${analysis.type}_${analysis.contract}_${analysis.fecha}.pdf`
+      : fileName;
 
-      const reviewContractDir = path.join(folders.review, contractFolder);
-      await mkdir(reviewContractDir, { recursive: true });
+    try {
+      await mkdir(destinationDirectory, { recursive: true });
+      const destinationPath = await getSafeDestination(
+        destinationDirectory,
+        destinationFileName,
+      );
+      await rename(filePath, destinationPath);
 
-      const destPath = getSafeDestination(reviewContractDir, fileName);
-
-      try {
-        await rename(filePath, destPath);
-        console.log(`📁 Movido a review: ${path.relative(folders.review, destPath)}`);
-        if (reviewReason) console.log(`   Motivo: ${reviewReason}`);
-        reviewCount++;
-      } catch (moveError) {
-        console.error(`❌ Error moviendo a review:`, moveError);
-        errorCount++;
-      }
-    } else if (analysis) {
-      // PROCESADO - renombrar y mover a processed
-      const newFileName = `${analysis.type}_${analysis.contract}_${analysis.fecha}.pdf`;
-      const processedContractDir = path.join(folders.processed, analysis.contract);
-      await mkdir(processedContractDir, { recursive: true });
-
-      const destPath = getSafeDestination(processedContractDir, newFileName);
-
-      try {
-        await rename(filePath, destPath);
-        console.log(`✅ Procesado: ${path.relative(folders.processed, destPath)}`);
+      if (isProcessed) {
+        console.log(`✅ Procesado: ${path.relative(folders.processed, destinationPath)}`);
         processedCount++;
-      } catch (moveError) {
-        console.error(`❌ Error moviendo a processed:`, moveError);
-        errorCount++;
+      } else {
+        console.log(`📋 Movido a revisión: ${path.relative(folders.review, destinationPath)}`);
+        console.log(`   Motivo: ${reviewReason || "Datos no procesables"}`);
+        reviewCount++;
       }
+    } catch (error) {
+      console.error(`❌ No se pudo mover ${fileName}; se deja en input:`, error);
+      errorCount++;
     }
 
     console.log("");
@@ -143,5 +155,5 @@ export async function startFolder(folders: FolderPaths) {
   console.log(`Total PDFs:       ${pdfFiles.length}`);
   console.log(`✅ Procesados:    ${processedCount}`);
   console.log(`📋 En revisión:   ${reviewCount}`);
-  console.log(`❌ Errores:       ${errorCount}`);
+  console.log(`❌ Errores move:  ${errorCount}`);
 }

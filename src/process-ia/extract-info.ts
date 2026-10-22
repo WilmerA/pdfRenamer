@@ -1,8 +1,16 @@
 import { OpenRouter } from '@openrouter/sdk';
 
-const client = new OpenRouter({
-  apiKey: Bun.env.API_OPEN_ROUTER,
-});
+let client: OpenRouter | undefined;
+
+function getClient(): OpenRouter {
+  const apiKey = process.env.API_OPEN_ROUTER?.trim();
+  if (!apiKey) {
+    throw new Error('Falta configurar API_OPEN_ROUTER.');
+  }
+
+  client ??= new OpenRouter({ apiKey });
+  return client;
+}
 
 export interface AnalysisResult {
   status: 'PROCESADO' | 'PENDIENTE';
@@ -12,7 +20,7 @@ export interface AnalysisResult {
 }
 
 export async function getInfo(textFile: string): Promise<AnalysisResult> {
-  const completion = await client.chat.send({
+  const completion = await getClient().chat.send({
     chatRequest: {
       model: 'openai/gpt-4o-mini',
       messages: [

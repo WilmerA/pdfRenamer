@@ -2,7 +2,8 @@
   "name": "pdf-renamer",
   "type": "module",
   "scripts": {
-    "dev": "bun run src/index.ts"
+    "dev": "bun run src/index.ts",
+    "build:windows": "bun run scripts/build-windows.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
